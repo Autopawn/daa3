@@ -1,5 +1,8 @@
 results
+target
+project
 test.jar
+cacerts
 
 *.class
 *.log
