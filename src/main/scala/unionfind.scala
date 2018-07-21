@@ -40,6 +40,17 @@ class UnionFind() {
         }
     }
 
+    def retrieveLabels() : HashMap[Int,Int] = {
+        var hm : HashMap[Int,Int] = new HashMap[Int,Int]
+        val retri : Array[List[Int]] = this.retrieve()
+        for(i <- 0 to retri.length-1){
+            for(x <- retri(i)){
+                hm(x) = i
+            }
+        }
+        hm
+    }
+
     def retrieve() : Array[List[Int]] = {
         var nxt_idx : Int = 0
         var trnf : HashMap[Int,Int] = new HashMap[Int,Int]
@@ -55,5 +66,6 @@ class UnionFind() {
         }
         parts
     }
+
 
 }

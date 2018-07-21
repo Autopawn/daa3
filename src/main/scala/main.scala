@@ -2,17 +2,23 @@ import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
 import org.apache.spark._
 
+import java.io.File
+import java.io.PrintWriter
+
 import collection.mutable.HashMap
 import collection.mutable.HashSet
 
 object Clustering {
 
     def main(args: Array[String]) {
-        val n_partitions: Int = 8
+        val n_partitions = 4
+        val max_corept_part = 10 // Maximum core points per partition
+
         val k = 10
-        val eps = 3
-        val minpts = 3 // Minimum density to be core point.
-        val max_corept_part = 5 // Maximum core points per partition
+        val eps = 4
+        val minpts = 2 // Minimum density to be core point.
+
+        val finalcore_eps = 6
 
         val master_url = "spark://graya:7077"
         val spark_home = "/home/fcasas/Videos/spark-2.3.1-bin-hadoop2.7"
@@ -32,46 +38,63 @@ object Clustering {
                 dists = k :: dists
             }
             // Nearest neighboors for each node:
-            val nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k, dists, null)
+            val nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k,dists,null)
             // Core points and their computed SNN
-            val (cpts,snn) : (List[Int],HashMap[(Int,Int),Int]) =
-                Ops.corePoints(eps, minpts, nneighs)
+            val (cpts,snn) : (HashSet[Int],HashMap[(Int,Int),Int]) =
+                Ops.corePoints(eps,minpts,nneighs)
             // Clustering
-            val clusters : Array[List[Int]] = Ops.clustering(eps,cpts,snn)
+            val uf : UnionFind = Ops.clustering(eps,cpts,snn)
+            val clusters : Array[List[Int]] = uf.retrieve()
             // Select core points ponderated by their pertenency to a cluster
             val sel_cpts : List[Int] = Ops.selectPonderated(clusters,max_corept_part)
+            // Print number of core points and clusters:
+            println("------------- CORE: "+sel_cpts.length+" / "+cpts.size)
+            println("------------- CLUSTERS: "+clusters.length)
+            //
             sel_cpts.toIterator
         })
 
-        // Collect the corepoints and distances again, here in the master:
-        val dists : Array[(Int,Int,Int)] = df_parsed.collect()
+        // Collect the corepoints and computee distances again, here in the master:
         val corepts : Array[Int] = df_coreps.collect()
+        println("------------- TOTAL COREPTS: "+corepts.length)
+        val dists : List[(Int,Int,Int)] = df_parsed.collect().toList
         // Nearest neighboors only between corepoints:
         val c_set : HashSet[Int] = HashSet() ++ corepts
-        val c_nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k,dists.toList,c_set)
-        // Corecore points and their computed SNN
-        val (c_cpts,c_snn) : (List[Int],HashMap[(Int,Int),Int]) =
-            Ops.corePoints(eps, minpts, c_nneighs)
-        // Clustering
-        val c_clusters : Array[List[Int]] = Ops.clustering(eps,c_cpts,c_snn)
+        val c_nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k,dists,c_set)
+        // final core points and their computed SNN
+        val (c_cpts,c_snn) : (HashSet[Int],HashMap[(Int,Int),Int]) =
+            Ops.corePoints(eps,minpts,c_nneighs)
+        println("------------- TOTAL CORECOREPTS: "+c_cpts.size)
+        // Clustering of final core points
+        val c_clusters : UnionFind = Ops.clustering(finalcore_eps,c_cpts,c_snn)
+        println("------------- TOTAL CLUSTERS: "+c_clusters.nGroups())
+        // Nearest neighboors for all nodes (to compute the SNN with the corepoints):
+        val nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k,dists,null)
+        // Join each node to its nearest final corepoint
+        for(i <- nneighs.keys){
+            var nearest : Int = -1
+            if(c_cpts contains i){
+                nearest = i
+            } else {
+                var max_simil : Int = eps
+                for(ccp <- c_cpts){
+                    val common = (nneighs(i) & nneighs(ccp)).size
+                    if(common>=max_simil) nearest = ccp
+                }
+            }
+            if(nearest>=0){
+                c_clusters.add(i)
+                c_clusters.union(i,nearest)
+            }
+        }
+        // Get the final labels for each node, save them on a file
+        val pw = new PrintWriter(new File("results/labels"))
+        val labels : HashMap[Int,Int] = c_clusters.retrieveLabels()
+        for(n <- labels.keys){
+            pw.write(n+","+labels(n)+"\n")
+        }
+        pw.close()
 
-
-
-
-
-        // // Send every core point to the same partition:
-        // val df_merged = df_coreps.coalesce(1)
-        // val df_final = df_merged.mapPartitions(cpts => {
-        //     val abomination = df_parsed.collect()
-        //
-        //     // val nneighs : HashMap[Int,HashSet[Int]] = Ops.nearestNeighboors(k, dists)
-        //     abomination.toIterator
-        // })
-
-        // df_final.saveAsTextFile("results")
-
-        System.out.println("OK");
+        println("OK");
     }
 }
-
-// def

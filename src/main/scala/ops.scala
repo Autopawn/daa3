@@ -9,7 +9,7 @@ object Ops {
         var hm : HashMap[Int,Array[List[Int]]] = new HashMap[Int,Array[List[Int]]]
         dists.foreach( tpl => {
             val (a,b,dist) = tpl
-            val concern : Boolean = nodes==null || ((nodes contains a) && (nodes contains b)) 
+            val concern : Boolean = nodes==null || ((nodes contains a) && (nodes contains b))
             if(dist>=0 && concern){
                 if(! (hm contains a)){
                     hm(a) = Array.fill[List[Int]](11)(Nil) // There are only 11 possible distances.
@@ -34,16 +34,16 @@ object Ops {
         })
     }
 
-    def corePoints(eps: Int, minpts: Int, nneighs: HashMap[Int,HashSet[Int]]) : (List[Int],HashMap[(Int,Int),Int]) = {
+    def corePoints(eps: Int, minpts: Int, nneighs: HashMap[Int,HashSet[Int]]) : (HashSet[Int],HashMap[(Int,Int),Int]) = {
         // Compute corepoints:
-        var coreps : List[Int] = Nil
+        var coreps : HashSet[Int] = new HashSet[Int]
         for(a <- nneighs.keys){
             var density : Int = 0
             for(b <- nneighs.keys){
                 val common = (nneighs(a) & nneighs(b)).size
                 if(common>=eps) density += 1
             }
-            if(density>=minpts) coreps = a :: coreps
+            if(density>=minpts) coreps += a
         }
         // Compute SNN between corepoints:
         var snn : HashMap[(Int,Int),Int] = new HashMap[(Int,Int),Int]
@@ -56,20 +56,18 @@ object Ops {
         (coreps,snn)
     }
 
-    def clustering(eps: Int, cores: List[Int], snn: HashMap[(Int,Int),Int]) : Array[List[Int]] = {
+    def clustering(eps: Int, cores: HashSet[Int], snn: HashMap[(Int,Int),Int]) : UnionFind = {
         // Create a new group for each core point
         var uf : UnionFind = new UnionFind
         for(cp <- cores) uf.add(cp)
         // Join all the corepoints that have a snn of at least eps
         for(p <- snn.keys){
-            if(snn(p) <= eps){
+            if(snn(p) >= eps){
                 val (a,b) = p
                 uf.union(a,b)
             }
         }
-        // Get all the groups
-        val groups : Array[List[Int]] = uf.retrieve()
-        groups
+        uf
     }
 
     def selectPonderated(cps: Array[List[Int]], nsel : Int) : List[Int] = {
@@ -78,33 +76,36 @@ object Ops {
         for(part <- cps){
             totaln += part.size
         }
-        // Get total ponderation
-        var totalp : Double = 0.0
-        for(part <- cps){
-            totalp += (1.0-part.size/totaln.toDouble)/2.0
-        }
         // Pick nsel points:
         var selected : List[Int] = Nil
-        if(nsel>=totaln){
+        if(nsel<totaln){
+            // Get total ponderation
+            var totalp : Double = 0.0
+            for(part <- cps){
+                totalp += (1.0-part.size.toDouble/totaln.toDouble)/2.0
+            }
             // NOTE: can be done faster with segment trees
-            var roulette : Double = Random.nextDouble*totalp
-            // First pick the set:
-            for(i <- 0 to cps.size-1){
-                if(roulette>0 && cps(i).size>0){
-                    roulette -= (1.0-cps(i).size/totaln.toDouble)/2.0
-                    if(roulette<=0){
-                        // Update total ponderation:
-                        totalp -= (1.0-cps(i).size/totaln.toDouble)/2.0
-                        // Pick random element from cps(i)
-                        val p :Int = Random.nextInt%cps(i).size
-                        val x : Int = (cps(i).drop(p)).head
-                        // Save point and set
-                        selected = x :: selected
-                        // Update the set, remove element
-                        cps(i) = List.concat(cps(i).take(p),cps(i).drop(p+1))
-                        // Recover total ponderation
-                        if(cps(i).size>0){
-                            totalp += (1.0-cps(i).size/totaln.toDouble)/2.0
+            for(k <- 0 to nsel-1){
+                var roulette : Double = totalp*Random.nextDouble()
+                // First pick the set:
+                for(i <- 0 to cps.size-1){
+                    if(roulette>=0 && cps(i).size>0){
+                        roulette -= (1.0-cps(i).size.toDouble/totaln.toDouble)/2.0
+                        if(roulette<=0){
+                            roulette = -1
+                            // Update total ponderation:
+                            totalp -= (1.0-cps(i).size.toDouble/totaln.toDouble)/2.0
+                            // Pick random element from cps(i)
+                            val p : Int = Random.nextInt(cps(i).size)
+                            val x : Int = (cps(i).drop(p)).head
+                            // Save point and set
+                            selected = x :: selected
+                            // Update the set, remove element
+                            cps(i) = List.concat(cps(i).take(p),cps(i).drop(p+1))
+                            // Recover total ponderation
+                            if(cps(i).size>0){
+                                totalp += (1.0-cps(i).size.toDouble/totaln.toDouble)/2.0
+                            }
                         }
                     }
                 }
@@ -121,15 +122,3 @@ object Ops {
     }
 
 }
-
-
-/*
-
-Form clusters from the core points.
-If two core points are within a radius Eps of each other then they are placed in the same cluster.
-
-Discard all noise points. All non-core points that are not within a radius of Eps of a core point are discarded.
-
-Assign all non-noise, non-core points to clusters. We can do this by assigning such points to the nearest core point.
-
-*/

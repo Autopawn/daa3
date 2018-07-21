@@ -3,6 +3,7 @@ target
 project
 test.jar
 cacerts
+informe.pdf
 
 *.class
 *.log
